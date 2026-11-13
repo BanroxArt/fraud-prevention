@@ -1,0 +1,21 @@
+PY ?= python3
+
+.PHONY: install lint test check demo
+
+install:
+	$(PY) -m pip install -e '.[dev]'
+
+lint:
+	ruff check .
+	ruff format --check .
+	$(PY) scripts/check.py
+
+test:
+	$(PY) -m pytest -q
+
+check: lint test
+
+demo:
+	$(PY) -m fraudkit synth --seed 7 --accounts 300 -o /tmp/fraudkit-events.jsonl
+	$(PY) -m fraudkit score /tmp/fraudkit-events.jsonl -o /tmp/fraudkit-scored.jsonl
+	$(PY) -m fraudkit eval /tmp/fraudkit-scored.jsonl
