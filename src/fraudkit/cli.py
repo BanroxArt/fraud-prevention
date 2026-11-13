@@ -1,4 +1,4 @@
-"""Command line entry point: ``fraudkit score|synth|eval``."""
+"""Command line entry point: ``fraudkit score|synth|eval|validate``."""
 
 from __future__ import annotations
 
@@ -8,7 +8,9 @@ import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
+
+import yaml
 
 from fraudkit.engine import Engine
 from fraudkit.events import Event, EventError, read_jsonl
@@ -33,12 +35,14 @@ def cmd_score(args: argparse.Namespace) -> int:
     engine = Engine(cfg)
     bad = 0
     with _open_in(args.events) as fh:
-        parsed = list(read_jsonl(fh)) if args.sort else read_jsonl(fh)
+        parsed: Iterable[tuple[int, Event | EventError]] = read_jsonl(fh)
         if args.sort:
-            good = [(n, e) for n, e in parsed if isinstance(e, Event)]
-            errs = [(n, e) for n, e in parsed if isinstance(e, EventError)]
-            good.sort(key=lambda p: p[1].ts)
-            parsed = errs + good
+            items = list(parsed)
+            good = [(n, e) for n, e in items if isinstance(e, Event)]
+            errs = [(n, e) for n, e in items if isinstance(e, EventError)]
+            # Ties on ts keep input order (line number), so output is stable.
+            good.sort(key=lambda p: (p[1].ts, p[0]))
+            parsed = [*errs, *good]
         out = _open_out(args.output)
         try:
             for n, item in parsed:
@@ -72,7 +76,7 @@ def cmd_synth(args: argparse.Namespace) -> int:
     return 0
 
 
-def evaluate(rows: Iterable[dict]) -> dict:
+def evaluate(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """Account-level eval: an account counts as flagged if any of its events reached the action."""
     worst: dict[str, str] = {}
     label: dict[str, bool] = {}
@@ -87,7 +91,11 @@ def evaluate(rows: Iterable[dict]) -> dict:
         worst.setdefault(acct, "allow")
         for r in row.get("reasons", []):
             codes_by_acct[acct].add(r["code"])
-    result: dict = {"accounts": len(label), "fraud_accounts": sum(label.values()), "bands": {}}
+    result: dict[str, Any] = {
+        "accounts": len(label),
+        "fraud_accounts": sum(label.values()),
+        "bands": {},
+    }
     for band in ("review", "deny"):
         flagged = {a for a, w in worst.items() if rank[w] >= rank[band]}
         tp = sum(1 for a in flagged if label[a])
@@ -99,7 +107,7 @@ def evaluate(rows: Iterable[dict]) -> dict:
             "recall": round(tp / (tp + fn), 3) if tp + fn else None,
             "false_positives": fp,
         }
-    per_code: dict[str, Counter] = defaultdict(Counter)
+    per_code: dict[str, Counter[str]] = defaultdict(Counter)
     for acct, codes in codes_by_acct.items():
         for c in codes:
             per_code[c]["fraud" if label[acct] else "legit"] += 1
@@ -114,8 +122,23 @@ def evaluate(rows: Iterable[dict]) -> dict:
 
 
 def cmd_eval(args: argparse.Namespace) -> int:
+    rows: list[dict[str, Any]] = []
     with _open_in(args.scored) as fh:
-        rows = [json.loads(line) for line in fh if line.strip()]
+        for n, line in enumerate(fh, 1):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                print(f"line {n}: invalid JSON: {exc.msg}", file=sys.stderr)
+                return 2
+            if not isinstance(row, dict) or "account_id" not in row or "action" not in row:
+                print(f"line {n}: scored rows need account_id and action", file=sys.stderr)
+                return 2
+            if row["action"] not in ("allow", "review", "deny"):
+                print(f"line {n}: unknown action {row['action']!r}", file=sys.stderr)
+                return 2
+            rows.append(row)
     if not any("label" in r for r in rows):
         print("no label field in scored rows; eval needs labelled input", file=sys.stderr)
         return 2
@@ -132,6 +155,25 @@ def cmd_eval(args: argparse.Namespace) -> int:
     print("\nreason code               accounts  precision")
     for code, m in res["codes"].items():
         print(f"{code:<26}{m['accounts']:>8}  {m['precision']:>9}")
+    return 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    try:
+        cfg = load_rules(args.rules)
+    except (OSError, RuleError, yaml.YAMLError) as exc:
+        print(f"rules: {exc}", file=sys.stderr)
+        return 1
+    unweighted = sorted(
+        {r.code for r in cfg.velocity if r.weight == 0}
+        | {k for k, v in cfg.weights.items() if v == 0}
+    )
+    print(
+        f"ok: {len(cfg.velocity)} velocity rules, {len(cfg.weights)} weights, "
+        f"review_at {cfg.review_at:g}, deny_at {cfg.deny_at:g}"
+    )
+    if unweighted:
+        print(f"weight 0 (explain only): {', '.join(unweighted)}")
     return 0
 
 
@@ -160,9 +202,13 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("scored")
     e.add_argument("--json", action="store_true")
     e.set_defaults(func=cmd_eval)
+    v = sub.add_parser("validate", help="load a rules file and report problems")
+    v.add_argument("rules", type=Path)
+    v.set_defaults(func=cmd_validate)
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    result: int = args.func(args)
+    return result

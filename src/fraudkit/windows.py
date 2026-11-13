@@ -8,15 +8,23 @@ Late events (older than the newest one already seen for that key) are
 inserted in order. That costs O(n) for the key, which is fine when lateness is
 rare. If your stream is badly out of order, sort it first (``--sort`` on the
 CLI) instead of relying on this path.
+
+Keys usually come from event data (device ids, card fingerprints), so a
+sender that rotates them can grow a window without bound inside one time
+span. ``max_keys`` caps the number of keys held; past it the least recently
+updated key is dropped. ``prune(now)`` still does the time-based cleanup.
 """
 
 from __future__ import annotations
 
 import bisect
 from collections import Counter, defaultdict, deque
+from typing import Any
+
+DEFAULT_MAX_KEYS = 1_000_000
 
 
-def _insert(q: deque, item: tuple) -> None:
+def _insert(q: deque[Any], item: tuple[Any, ...]) -> None:
     if not q or item[0] >= q[-1][0]:
         q.append(item)
         return
@@ -29,13 +37,32 @@ def _insert(q: deque, item: tuple) -> None:
 class CountWindow:
     """Number of events per key in the trailing window."""
 
-    def __init__(self, window_s: float) -> None:
+    def __init__(self, window_s: float, max_keys: int = DEFAULT_MAX_KEYS) -> None:
         if window_s <= 0:
             raise ValueError("window must be positive")
+        if max_keys < 1:
+            raise ValueError("max_keys must be positive")
         self.window_s = window_s
-        self._q: dict[str, deque[tuple[float]]] = defaultdict(deque)
+        self.max_keys = max_keys
+        self.evicted = 0
+        self._q: dict[str, deque[Any]] = defaultdict(deque)
 
-    def _evict(self, key: str, now: float) -> deque:
+    def _touch(self, key: str) -> deque[Any]:
+        """Return the deque for ``key`` and mark it most recently used."""
+        q = self._q.pop(key, None)
+        if q is None:
+            q = deque()
+        self._q[key] = q
+        while len(self._q) > self.max_keys:
+            oldest = next(iter(self._q))
+            self._drop(oldest)
+            self.evicted += 1
+        return q
+
+    def _drop(self, key: str) -> None:
+        del self._q[key]
+
+    def _evict(self, key: str, now: float) -> deque[Any]:
         q = self._q[key]
         cutoff = now - self.window_s
         while q and q[0][0] <= cutoff:
@@ -43,6 +70,7 @@ class CountWindow:
         return q
 
     def add(self, key: str, ts: float) -> int:
+        self._touch(key)
         q = self._evict(key, ts)
         _insert(q, (ts,))
         return len(q)
@@ -56,7 +84,7 @@ class CountWindow:
         """Drop keys with nothing left in the window. Returns how many were dropped."""
         dead = [k for k in self._q if not self._evict(k, now)]
         for k in dead:
-            del self._q[k]
+            self._drop(k)
         return len(dead)
 
     def __len__(self) -> int:
@@ -66,11 +94,15 @@ class CountWindow:
 class SumWindow(CountWindow):
     """Sum of a numeric value per key, e.g. card spend in the last hour."""
 
-    def __init__(self, window_s: float) -> None:
-        super().__init__(window_s)
+    def __init__(self, window_s: float, max_keys: int = DEFAULT_MAX_KEYS) -> None:
+        super().__init__(window_s, max_keys)
         self._sum: dict[str, float] = defaultdict(float)
 
-    def _evict(self, key: str, now: float) -> deque:
+    def _drop(self, key: str) -> None:
+        super()._drop(key)
+        self._sum.pop(key, None)
+
+    def _evict(self, key: str, now: float) -> deque[Any]:
         q = self._q[key]
         cutoff = now - self.window_s
         while q and q[0][0] <= cutoff:
@@ -82,6 +114,7 @@ class SumWindow(CountWindow):
         return q
 
     def add(self, key: str, ts: float, value: float = 1.0) -> float:  # type: ignore[override]
+        self._touch(key)
         q = self._evict(key, ts)
         _insert(q, (ts, value))
         self._sum[key] += value
@@ -103,11 +136,15 @@ class SumWindow(CountWindow):
 class DistinctWindow(CountWindow):
     """Distinct values per key, e.g. distinct accounts seen on one device in 24h."""
 
-    def __init__(self, window_s: float) -> None:
-        super().__init__(window_s)
+    def __init__(self, window_s: float, max_keys: int = DEFAULT_MAX_KEYS) -> None:
+        super().__init__(window_s, max_keys)
         self._seen: dict[str, Counter[str]] = defaultdict(Counter)
 
-    def _evict(self, key: str, now: float) -> deque:
+    def _drop(self, key: str) -> None:
+        super()._drop(key)
+        self._seen.pop(key, None)
+
+    def _evict(self, key: str, now: float) -> deque[Any]:
         q = self._q[key]
         seen = self._seen[key]
         cutoff = now - self.window_s
@@ -118,7 +155,8 @@ class DistinctWindow(CountWindow):
                 del seen[value]
         return q
 
-    def add(self, key: str, ts: float, value: str = "") -> int:  # type: ignore[override]
+    def add(self, key: str, ts: float, value: str = "") -> int:
+        self._touch(key)
         q = self._evict(key, ts)
         _insert(q, (ts, value))
         self._seen[key][value] += 1

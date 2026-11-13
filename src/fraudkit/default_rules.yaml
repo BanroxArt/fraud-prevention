@@ -88,22 +88,36 @@ email:
     - sharklasers.com
 
 ip:
-  # Fill these from your own provider data. The documentation range below is
-  # only here so the file parses with a non-empty example.
-  hosting_cidrs: [203.0.113.0/24]
+  # Empty on purpose. Fill these from your own provider data; nothing useful
+  # can ship here. examples/demo-rules.yaml points them at a documentation
+  # range so the synthetic demo has something to hit.
+  hosting_cidrs: []
   blocked_cidrs: []
 
 ato:
   window: 24h
+  device_ttl: 90d             # forget devices and idle accounts after this
 
 linking:
   link_on: [device_id, card_fp, email_norm, phone]
-  max_attribute_degree: 25
+  window: 90d                 # links and redemptions older than this age out
+  max_attribute_degree: 25    # one attribute links at most this many accounts
+  max_cluster_size: 500       # refuse merges that would grow a cluster past this
   promo_max_accounts_per_cluster: 1
 
 identity:
   reuse_window: 30d
   reuse_threshold: 3
+  card_reuse_threshold: 2
+
+# Memory bounds. Event fields become keys, so these stop a sender that
+# rotates device ids or card fingerprints from growing state without limit.
+state:
+  dedup_window: 24h           # repeated event_id inside this returns the first decision
+  dedup_max_ids: 200000
+  max_keys_per_window: 1000000
+  max_accounts: 1000000
+  max_link_edges: 2000000
 
 allowlist:
   accounts: []

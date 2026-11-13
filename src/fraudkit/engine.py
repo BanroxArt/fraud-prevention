@@ -4,11 +4,24 @@
 decision with every reason that fired. State is process-local; for more than
 one worker, shard by account and accept that cross-shard signals (shared
 devices, rings) need a shared store. See docs/threat-model.md.
+
+Scoring is idempotent per ``event_id``. Queues redeliver, clients retry, and
+without this a payment redelivered eight times would count as eight card
+attempts. A repeated id inside ``dedup_window`` gets the original decision
+back, marked ``duplicate``, and touches no state. Events without an id cannot
+be deduplicated; set one upstream.
+
+Every piece of state has a bound: windows cap their keys, the takeover
+tracker caps accounts and ages them out, the linker ages out edges, and the
+dedup cache is capped by count and age. ``prune`` runs every ``PRUNE_EVERY``
+events against the newest timestamp seen so far, so one late event cannot
+drag pruning back in time.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from collections import OrderedDict
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from fraudkit.ato import AtoTracker
@@ -40,6 +53,7 @@ class Decision:
     score: float
     action: str
     reasons: list[Reason] = field(default_factory=list)
+    duplicate: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -64,18 +78,31 @@ class Engine:
     def __init__(self, config: RuleConfig) -> None:
         self.cfg = config
         self.ips = IpClassifier(config.hosting_cidrs, config.blocked_cidrs)
-        self.ato = AtoTracker(window_s=config.ato_window_s)
-        self.linker = Linker(max_degree=config.max_attribute_degree)
+        self.ato = AtoTracker(
+            window_s=config.ato_window_s,
+            device_ttl_s=config.device_ttl_s,
+            max_accounts=config.max_accounts,
+        )
+        self.linker = Linker(
+            max_degree=config.max_attribute_degree,
+            max_cluster=config.max_cluster_size,
+            ttl_s=config.link_window_s,
+            max_edges=config.max_link_edges,
+        )
+        max_keys = config.max_keys_per_window
         self._windows: dict[str, CountWindow] = {}
         for rule in config.velocity:
             cls = {"count": CountWindow, "sum": SumWindow, "distinct": DistinctWindow}[rule.kind]
-            self._windows[rule.code] = cls(rule.window_s)
+            self._windows[rule.code] = cls(rule.window_s, max_keys)
         reuse = config.identity_reuse_window_s
-        self._phone_accounts = DistinctWindow(reuse)
-        self._address_accounts = DistinctWindow(reuse)
-        self._card_accounts = DistinctWindow(reuse)
-        self._promo_by_account: dict[str, set[str]] = {}
+        self._phone_accounts = DistinctWindow(reuse, max_keys)
+        self._address_accounts = DistinctWindow(reuse, max_keys)
+        self._card_accounts = DistinctWindow(reuse, max_keys)
+        # account -> promo code -> last redemption ts, aged with the link window
+        self._promo_by_account: OrderedDict[str, dict[str, float]] = OrderedDict()
+        self._decisions: OrderedDict[str, Decision] = OrderedDict()
         self._seen = 0
+        self._high_water = float("-inf")
 
     @staticmethod
     def _field(ev: Event, name: str) -> str | None:
@@ -122,7 +149,7 @@ class Engine:
             if not value:
                 continue
             n = win.add(value.strip().lower(), ev.ts, ev.account_id)
-            limit = 2 if code == "ID_CARD_REUSE_AT_SIGNUP" else th
+            limit = self.cfg.card_reuse_threshold if code == "ID_CARD_REUSE_AT_SIGNUP" else th
             if n >= limit:
                 out.append((code, f"{n} accounts in reuse window"))
         return out
@@ -131,20 +158,51 @@ class Engine:
         if ev.type != "promo_redeem" or not ev.promo_code:
             return []
         out = []
-        used = self._promo_by_account.setdefault(ev.account_id, set())
+        used = self._promo_by_account.pop(ev.account_id, None) or {}
+        self._promo_by_account[ev.account_id] = used
+        while len(self._promo_by_account) > self.cfg.max_accounts:
+            self._promo_by_account.popitem(last=False)
         if ev.promo_code in used:
             out.append(("PROMO_REPEAT_ACCOUNT", ev.promo_code))
-        used.add(ev.promo_code)
-        n = self.linker.redeem(ev.account_id, ev.promo_code)
+        used[ev.promo_code] = max(ev.ts, used.get(ev.promo_code, ev.ts))
+        n = self.linker.redeem(ev.account_id, ev.promo_code, ev.ts)
         if n > self.cfg.promo_max_accounts_per_cluster:
             out.append(("PROMO_LINKED_REDEMPTION", f"{n} linked accounts used {ev.promo_code}"))
         return out
 
+    def _replayed(self, ev: Event) -> Decision | None:
+        if not ev.event_id:
+            return None
+        prior = self._decisions.get(ev.event_id)
+        if prior is None:
+            return None
+        if self._high_water - prior.ts >= self.cfg.dedup_window_s:
+            # Too old to be a redelivery we can vouch for; score it fresh.
+            del self._decisions[ev.event_id]
+            return None
+        return replace(prior, reasons=list(prior.reasons), duplicate=True)
+
+    def _remember(self, decision: Decision) -> None:
+        if not decision.event_id:
+            return
+        self._decisions[decision.event_id] = decision
+        self._decisions.move_to_end(decision.event_id)
+        while len(self._decisions) > self.cfg.dedup_max_ids:
+            self._decisions.popitem(last=False)
+
     def score(self, ev: Event) -> Decision:
+        self._high_water = max(self._high_water, ev.ts)
+        replayed = self._replayed(ev)
+        if replayed is not None:
+            return replayed
         self._seen += 1
         if self._seen % PRUNE_EVERY == 0:
-            self.prune(ev.ts)
+            self.prune(self._high_water)
+        decision = self._score(ev)
+        self._remember(decision)
+        return decision
 
+    def _score(self, ev: Event) -> Decision:
         hits: list[tuple[str, str]] = []
         reasons: list[Reason] = []
 
@@ -163,7 +221,7 @@ class Engine:
         hits += self._identity(ev)
         if ev.type in LINK_EVENTS:
             attrs = {f: self._field(ev, f) for f in self.cfg.link_on}
-            for attr in self.linker.link(ev.account_id, attrs):
+            for attr in self.linker.link(ev.account_id, attrs, ev.ts):
                 hits.append(("LINK_SUPERNODE", attr.split(":", 1)[0]))
         hits += self._promo(ev)
 
@@ -183,8 +241,38 @@ class Engine:
             action = "allow"
         return Decision(ev.event_id, ev.account_id, ev.ts, total, action, reasons)
 
-    def prune(self, now: float) -> None:
+    def prune(self, now: float) -> dict[str, int]:
+        """Age out state older than its window. Returns how much each part dropped."""
+        dropped = {"windows": 0, "ato_accounts": 0, "link_edges": 0, "promo": 0, "dedup": 0}
         for win in self._windows.values():
-            win.prune(now)
+            dropped["windows"] += win.prune(now)
         for win in (self._phone_accounts, self._address_accounts, self._card_accounts):
-            win.prune(now)
+            dropped["windows"] += win.prune(now)
+        dropped["ato_accounts"] = self.ato.prune(now)
+        dropped["link_edges"] = self.linker.prune(now)
+        cutoff = now - self.cfg.link_window_s
+        for acct in list(self._promo_by_account):
+            codes = self._promo_by_account[acct]
+            for code in [c for c, ts in codes.items() if ts <= cutoff]:
+                del codes[code]
+                dropped["promo"] += 1
+            if not codes:
+                del self._promo_by_account[acct]
+        dedup_cutoff = now - self.cfg.dedup_window_s
+        for eid in [e for e, d in self._decisions.items() if d.ts <= dedup_cutoff]:
+            del self._decisions[eid]
+            dropped["dedup"] += 1
+        return dropped
+
+    def state_size(self) -> dict[str, int]:
+        """Rough count of held entries per structure, for metrics and tests."""
+        return {
+            "window_keys": sum(len(w) for w in self._windows.values())
+            + len(self._phone_accounts)
+            + len(self._address_accounts)
+            + len(self._card_accounts),
+            "ato_accounts": len(self.ato),
+            "link_edges": len(self.linker),
+            "promo_accounts": len(self._promo_by_account),
+            "dedup_ids": len(self._decisions),
+        }

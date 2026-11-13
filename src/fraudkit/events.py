@@ -3,11 +3,18 @@
 Events are flat JSON objects. Only ``ts``, ``type`` and ``account_id`` are
 required; everything else is optional because real event pipelines are
 patchy and a missing device id should lower confidence, not crash scoring.
+
+Every string field ends up as a key in some in-memory structure, so the
+parser bounds them: identifiers are capped at ``MAX_FIELD_LEN`` characters,
+an event may carry at most ``MAX_EXTRA_FIELDS`` extra fields, and amounts
+must be finite. Oversized input is rejected, not truncated, because two
+truncated values could collide into one key.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -43,6 +50,12 @@ _KNOWN = {
 }
 
 
+MAX_FIELD_LEN = 256
+MAX_EXTRA_FIELDS = 32
+MAX_EXTRA_KEY_LEN = 64
+MAX_EXTRA_VALUE_LEN = 1024
+
+
 class EventError(ValueError):
     pass
 
@@ -74,6 +87,8 @@ def parse_ts(value: Any) -> float:
     if isinstance(value, bool):
         raise EventError("ts must be a number or ISO 8601 string")
     if isinstance(value, (int, float)):
+        if not math.isfinite(value):
+            raise EventError("ts must be finite")
         return float(value)
     if isinstance(value, str):
         text = value.strip()
@@ -91,11 +106,34 @@ def parse_ts(value: Any) -> float:
     raise EventError("ts must be a number or ISO 8601 string")
 
 
+def _bounded(key: str, value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        raise EventError(f"{key} must be a scalar")
+    text = str(value)
+    if len(text) > MAX_FIELD_LEN:
+        raise EventError(f"{key} longer than {MAX_FIELD_LEN} characters")
+    return text
+
+
 def _opt_str(raw: dict[str, Any], key: str) -> str | None:
     v = raw.get(key)
     if v is None or v == "":
         return None
-    return str(v)
+    return _bounded(key, v)
+
+
+def _extra(raw: dict[str, Any]) -> dict[str, Any]:
+    extra = {k: v for k, v in raw.items() if k not in _KNOWN}
+    if len(extra) > MAX_EXTRA_FIELDS:
+        raise EventError(f"more than {MAX_EXTRA_FIELDS} extra fields")
+    for k, v in extra.items():
+        if len(k) > MAX_EXTRA_KEY_LEN:
+            raise EventError(f"extra field name longer than {MAX_EXTRA_KEY_LEN} characters")
+        if isinstance(v, str) and len(v) > MAX_EXTRA_VALUE_LEN:
+            raise EventError(f"{k} longer than {MAX_EXTRA_VALUE_LEN} characters")
+        if isinstance(v, (dict, list)):
+            raise EventError(f"{k} must be a scalar")
+    return extra
 
 
 def parse_event(raw: dict[str, Any]) -> Event:
@@ -111,12 +149,16 @@ def parse_event(raw: dict[str, Any]) -> Event:
         amount = float(raw.get("amount") or 0.0)
     except (TypeError, ValueError) as exc:
         raise EventError("amount must be numeric") from exc
-    extra = {k: v for k, v in raw.items() if k not in _KNOWN}
+    if not math.isfinite(amount):
+        raise EventError("amount must be finite")
+    account_id = _bounded("account_id", raw["account_id"])
+    if not account_id:
+        raise EventError("account_id is empty")
     return Event(
         ts=parse_ts(raw["ts"]),
         type=etype,
-        account_id=str(raw["account_id"]),
-        event_id=str(raw.get("event_id") or ""),
+        account_id=account_id,
+        event_id=_opt_str(raw, "event_id") or "",
         device_id=_opt_str(raw, "device_id"),
         ip=_opt_str(raw, "ip"),
         email=_opt_str(raw, "email"),
@@ -125,7 +167,7 @@ def parse_event(raw: dict[str, Any]) -> Event:
         address=_opt_str(raw, "address"),
         amount=amount,
         promo_code=_opt_str(raw, "promo_code"),
-        extra=extra,
+        extra=_extra(raw),
     )
 
 

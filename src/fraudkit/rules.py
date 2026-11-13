@@ -82,10 +82,20 @@ class RuleConfig:
         default_factory=lambda: ["device_id", "card_fp", "email_norm", "phone"]
     )
     max_attribute_degree: int = 25
+    max_cluster_size: int = 500
+    link_window_s: float = 90 * 86_400.0
     promo_max_accounts_per_cluster: int = 1
     identity_reuse_window_s: float = 30 * 86_400.0
     identity_reuse_threshold: int = 3
+    card_reuse_threshold: int = 2
     allow_accounts: frozenset[str] = frozenset()
+    # Memory bounds. See "State and memory" in the README.
+    device_ttl_s: float = 90 * 86_400.0
+    dedup_window_s: float = 86_400.0
+    dedup_max_ids: int = 200_000
+    max_keys_per_window: int = 1_000_000
+    max_accounts: int = 1_000_000
+    max_link_edges: int = 2_000_000
 
     def weight(self, code: str) -> float:
         return self.weights.get(code, 0.0)
@@ -101,12 +111,29 @@ def _weight(value: Any, where: str) -> float:
     return w
 
 
+def _positive_int(value: Any, where: str) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RuleError(f"{where}: must be an integer") from exc
+    if n < 1:
+        raise RuleError(f"{where}: must be at least 1")
+    return n
+
+
+def _positive_duration(value: Any, where: str) -> float:
+    d = parse_duration(value)
+    if d <= 0:
+        raise RuleError(f"{where}: must be a positive duration")
+    return d
+
+
 def _velocity(raw: dict[str, Any], idx: int) -> VelocityRule:
     loc = f"velocity[{idx}]"
     try:
         code = str(raw["code"])
         key = str(raw["key"])
-        window = parse_duration(raw["window"])
+        window = _positive_duration(raw["window"], f"{loc}.window")
         threshold = float(raw["threshold"])
     except KeyError as exc:
         raise RuleError(f"{loc}: missing {exc.args[0]}") from exc
@@ -165,7 +192,7 @@ def build_rules(data: dict[str, Any]) -> RuleConfig:
     cfg.hosting_cidrs = list(ip.get("hosting_cidrs", []))
     cfg.blocked_cidrs = list(ip.get("blocked_cidrs", []))
     ato = data.get("ato", {})
-    cfg.ato_window_s = parse_duration(ato.get("window", "24h"))
+    cfg.ato_window_s = _positive_duration(ato.get("window", "24h"), "ato.window")
     link = data.get("linking", {})
     cfg.link_on = list(link.get("link_on", cfg.link_on))
     bad = set(cfg.link_on) - KEY_FIELDS
@@ -176,13 +203,36 @@ def build_rules(data: dict[str, Any]) -> RuleConfig:
         raise RuleError(
             "linking.link_on: linking on ip merges unrelated users; use velocity instead"
         )
-    cfg.max_attribute_degree = int(link.get("max_attribute_degree", cfg.max_attribute_degree))
-    cfg.promo_max_accounts_per_cluster = int(
-        link.get("promo_max_accounts_per_cluster", cfg.promo_max_accounts_per_cluster)
+    cfg.max_attribute_degree = _positive_int(
+        link.get("max_attribute_degree", cfg.max_attribute_degree), "linking.max_attribute_degree"
+    )
+    cfg.max_cluster_size = _positive_int(
+        link.get("max_cluster_size", cfg.max_cluster_size), "linking.max_cluster_size"
+    )
+    cfg.link_window_s = _positive_duration(link.get("window", "90d"), "linking.window")
+    cfg.promo_max_accounts_per_cluster = _positive_int(
+        link.get("promo_max_accounts_per_cluster", cfg.promo_max_accounts_per_cluster),
+        "linking.promo_max_accounts_per_cluster",
     )
     ident = data.get("identity", {})
-    cfg.identity_reuse_window_s = parse_duration(ident.get("reuse_window", "30d"))
-    cfg.identity_reuse_threshold = int(ident.get("reuse_threshold", cfg.identity_reuse_threshold))
+    cfg.identity_reuse_window_s = _positive_duration(
+        ident.get("reuse_window", "30d"), "identity.reuse_window"
+    )
+    cfg.identity_reuse_threshold = _positive_int(
+        ident.get("reuse_threshold", cfg.identity_reuse_threshold), "identity.reuse_threshold"
+    )
+    cfg.card_reuse_threshold = _positive_int(
+        ident.get("card_reuse_threshold", cfg.card_reuse_threshold),
+        "identity.card_reuse_threshold",
+    )
+    cfg.device_ttl_s = _positive_duration(ato.get("device_ttl", "90d"), "ato.device_ttl")
+    state = data.get("state", {})
+    if not isinstance(state, dict):
+        raise RuleError("state must be a mapping")
+    cfg.dedup_window_s = _positive_duration(state.get("dedup_window", "24h"), "state.dedup_window")
+    for name in ("dedup_max_ids", "max_keys_per_window", "max_accounts", "max_link_edges"):
+        if name in state:
+            setattr(cfg, name, _positive_int(state[name], f"state.{name}"))
     cfg.allow_accounts = frozenset(str(a) for a in data.get("allowlist", {}).get("accounts", []))
     return cfg
 

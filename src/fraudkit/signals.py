@@ -51,6 +51,10 @@ def normalize_email(email: str) -> str | None:
         domain = "gmail.com"
     if domain in _DOTLESS_PROVIDERS:
         local = local.replace(".", "")
+    if not local:
+        # "+promo@x" or ".@gmail.com" would all collapse to "@x" and link
+        # every such signup into one cluster.
+        return None
     return f"{local}@{domain}"
 
 
