@@ -22,7 +22,16 @@ Money leaving the platform (withdrawals, payouts, refunds), value granted by the
 - Event fields are set by your backend, not by the client. A `device_id` the client invents is a hint, not an identifier. If an attacker controls it, every device rule degrades to an IP rule.
 - Client IP is read from the right proxy header. `IP_NON_ROUTABLE` exists to tell you when it is not.
 - Events arrive roughly in time order and the scorer sees all of them for an account. Sharding by anything other than account breaks the takeover and velocity logic.
+- Events carry a unique `event_id`, so redelivery can be detected.
+- For accounts that predate the pipeline, the first device the engine sees is treated as the baseline, the same as a signup device. The alternative, flagging every account's first observed login as a new device, buries real takeovers in noise on day one. The cost is that a takeover device seen before any genuine one is trusted.
 - Phone and address are keyed hashes. A plain SHA-256 of a phone number can be reversed by brute force in minutes.
+
+## Attacks on the engine itself
+
+- **Replay.** Queues redeliver and clients retry. Without dedup, one payment seen eight times counts as eight card attempts. The engine returns the first decision for a repeated `event_id` inside `state.dedup_window` and leaves state untouched. Events with no id are not protected.
+- **State exhaustion.** Device ids, card fingerprints and free-form fields become dictionary keys. A sender who rotates them can try to grow memory without limit. The parser caps field lengths and the number of extra fields, and every in-memory structure has a time-based prune plus a hard cap (see "State and memory" in the README). At the cap the oldest keys are dropped, which loses signal for them; that is the trade for staying up.
+- **Linking poisoning.** Linking on a normalised email means `victim+anything` at the victim's provider lands in the same node as the victim's real address. Someone who registers that address can drag the victim into their cluster and make the victim's later promo use look linked. Plus-tag stripping applies to every domain, which also merges distinct mailboxes on the few providers where `+` is a literal character. If that matters for your traffic, link on a verified email only, or drop `email_norm` from `link_on`.
+- **Cluster growth.** The supernode cap is per attribute; `max_cluster_size` bounds the whole cluster so a long chain through different attributes cannot merge unrelated people.
 
 ## Known gaps
 

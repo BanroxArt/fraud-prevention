@@ -66,13 +66,13 @@ People and vendors
 
 Only if the team has event data or can export it.
 
-1. Map their events to the fraudkit schema (`ts`, `type`, `account_id`, plus `device_id`, `ip`, `email`, `phone`, `card_fp`, `address`, `amount`, `promo_code`). Phones and addresses should be keyed hashes. Never ask them to paste raw customer data into the chat; work from the schema and a synthetic sample.
-2. Start from `src/fraudkit/default_rules.yaml`. Remove rules for events they do not have. Set thresholds from their own volumes, for example the 99th percentile of signups per device per day, not from the defaults.
+1. Map their events to the fraudkit schema (`ts`, `type`, `account_id`, plus a unique `event_id` so redelivered events are not double counted, and `device_id`, `ip`, `email`, `phone`, `card_fp`, `address`, `amount`, `promo_code`). Phones and addresses should be keyed hashes. Never ask them to paste raw customer data into the chat; work from the schema and a synthetic sample.
+2. Start from `src/fraudkit/default_rules.yaml`. Remove rules for events they do not have. Set thresholds from their own volumes, for example the 99th percentile of signups per device per day, not from the defaults. Check the edited file with `fraudkit validate`.
 3. Run `fraudkit synth` and `fraudkit score` to show the team what each reason code looks like before touching real data.
 4. Run in shadow mode for at least two weeks. Use `fraudkit eval` on labelled outcomes to tune (see `docs/tuning.md`).
 5. Only then wire `deny`. Keep `review` going to a person.
 
-Call out the engine's limits when they matter: in-memory state, no shared store across workers, no device fingerprinting, no IP reputation data included.
+Call out the engine's limits when they matter: in-memory state with hard caps (see "State and memory" in the README), no shared store across workers, no device fingerprinting, no IP reputation data included.
 
 ## 5. Privacy
 
