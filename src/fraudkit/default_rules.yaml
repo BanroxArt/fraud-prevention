@@ -1,0 +1,109 @@
+# Starting weights. They are guesses until you have labelled outcomes from
+# your own traffic. See docs/tuning.md before changing them.
+version: 1
+
+decision:
+  review_at: 40
+  deny_at: 80
+
+velocity:
+  - code: VEL_LOGIN_IP_PREFIX
+    events: [login]
+    key: ip_prefix
+    window: 10m
+    threshold: 30
+    weight: 25
+  - code: VEL_FAILED_LOGIN_ACCOUNT
+    events: [login]
+    key: account_id
+    where: {success: false}
+    window: 15m
+    threshold: 10
+    weight: 20
+  - code: VEL_SIGNUPS_PER_DEVICE
+    events: [signup]
+    key: device_id
+    distinct: account_id
+    window: 24h
+    threshold: 3
+    weight: 45
+  - code: VEL_CARDS_PER_ACCOUNT
+    events: [payment]
+    key: account_id
+    distinct: card_fp
+    window: 24h
+    threshold: 4
+    weight: 40
+  - code: VEL_CARD_ATTEMPTS
+    events: [payment]
+    key: card_fp
+    window: 10m
+    threshold: 8
+    weight: 50
+  - code: VEL_CARD_SPEND
+    events: [payment]
+    key: card_fp
+    sum: amount
+    window: 1h
+    threshold: 2500
+    weight: 25
+  - code: VEL_WITHDRAWALS_PER_ACCOUNT
+    events: [withdrawal]
+    key: account_id
+    window: 24h
+    threshold: 4
+    weight: 30
+
+weights:
+  EMAIL_DISPOSABLE: 30
+  EMAIL_PLUS_TAG: 5
+  EMAIL_DIGIT_HEAVY: 8
+  EMAIL_RANDOM_LOCALPART: 12
+  EMAIL_MALFORMED: 20
+  EMAIL_MISSING: 0
+  IP_HOSTING: 20
+  IP_BLOCKLIST: 70
+  IP_NON_ROUTABLE: 0
+  IP_MALFORMED: 5
+  ATO_NEW_DEVICE_LOGIN: 5
+  ATO_CRED_CHANGE_AFTER_NEW_DEVICE: 30
+  ATO_NEW_DEVICE_CASHOUT: 35
+  ATO_CRED_CHANGE_CASHOUT: 25
+  ATO_CRED_AND_NEW_DEVICE: 55
+  ATO_SEQUENCE: 85
+  ID_PHONE_REUSE: 30
+  ID_ADDRESS_REUSE: 15
+  ID_CARD_REUSE_AT_SIGNUP: 35
+  PROMO_LINKED_REDEMPTION: 60
+  PROMO_REPEAT_ACCOUNT: 40
+  LINK_SUPERNODE: 0
+
+email:
+  disposable_domains:
+    - mailinator.com
+    - guerrillamail.com
+    - 10minutemail.com
+    - yopmail.com
+    - trashmail.com
+    - sharklasers.com
+
+ip:
+  # Fill these from your own provider data. The documentation range below is
+  # only here so the file parses with a non-empty example.
+  hosting_cidrs: [203.0.113.0/24]
+  blocked_cidrs: []
+
+ato:
+  window: 24h
+
+linking:
+  link_on: [device_id, card_fp, email_norm, phone]
+  max_attribute_degree: 25
+  promo_max_accounts_per_cluster: 1
+
+identity:
+  reuse_window: 30d
+  reuse_threshold: 3
+
+allowlist:
+  accounts: []
