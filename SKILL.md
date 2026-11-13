@@ -1,81 +1,93 @@
 ---
 name: fraud-prevention
-description: Run a practical fraud-prevention review or design a fraud workflow for a product, payments, lending, onboarding, or account-security team. Use when the user asks for a fraud checklist, an abuse review, KYC/AML-adjacent product controls, account takeover prevention, promo-abuse controls, or a first-pass fraud program for a startup. Do not use this to design evading controls, social-engineering third parties, or attacking a system the user does not own.
+description: Run a defensive fraud-prevention review, or design and stand up first-pass fraud rules, for a product with accounts, payments, payouts, lending, onboarding or promo credit. Use when the user asks for a fraud checklist, an abuse review, account takeover or promo-abuse controls, velocity rules, or a first fraud program for a startup. Includes a working rules engine (fraudkit) the agent can configure against the team's own event data. Do not use this to design ways around controls, to social-engineer third parties, or against a system the user does not own.
 ---
 
-# Fraud prevention checklist and workflow
+# Fraud prevention review and first rules
 
-You are helping a company build or review its own fraud program. Stay on the defensive side. If someone asks how to bypass controls, refuse.
+You are helping a team protect its own product. Stay on the defensive side. If asked how to get around a control, decline that part and keep going with the defence.
 
-## What this skill is for
+There are two halves. The review is a conversation and a short report. The rules half is code: this repo ships `fraudkit`, a small engine that scores JSONL events against a YAML rule file. Do the review first; only write rules once you know what is being abused.
 
-- A first fraud program for a startup that already has, or is about to have, users, payments, accounts, or credit applications.
-- A gap review of an existing program against a public, transparent checklist.
-- Writing a short internal workflow: detect → case → decide → recover → learn.
+## 1. Facts first
 
-## What this skill is not
+Ask what the product does and what has already gone wrong. Concretely:
 
-- A substitute for legal counsel, a bank sponsor’s program policy, or a licensed investigator.
-- A vendor recommendation engine. You may name categories (device intelligence, identity, case management) and let the company choose.
-- A guarantee of loss rates. Never invent a benchmark and present it as a fact.
+- Which value can leave or be granted: withdrawals, payouts, refunds, promo credit, referral bonuses, free trials, credit lines.
+- Which events the backend already records, and whether device id and client IP are set server-side.
+- Who looks at alerts today, if anyone, and how many cases a week they can handle.
+- Any regulated partner (sponsor bank, processor, lender). Their program policy wins over anything here.
 
-## How to work
+If they do not know, say so in the report. Do not fill gaps with invented loss rates or benchmarks.
 
-1. Ask what the product actually does (accounts, payments, cards, credit, marketplaces, promo credits) and what has already gone wrong, if anything. If they do not know, say so and start with the baseline, not with a theater of controls.
-2. Map **assets and abuse cases** before tools. Typical cases: fake signup, synthetic identity, account takeover, first-party / friendly fraud, promo and referral abuse, mule / stolen-funds movement, authorized-push-payment scams against users, insider abuse.
-3. For each case, write: the signal you can actually observe, the decision (allow, step-up, hold, deny), who owns the case, and how the user is told. Prefer step-up (more verification) over silent rejection unless the company has a reason and a process.
-4. Separate **identity proofing** (is this person real and present?) from **fraud risk** (is this action likely abusive?) from **credit risk** (will they repay?). Do not collapse those three into one score without saying so.
-5. Call out consent, privacy, and retention. Collect only what a control needs. Say when a vendor would touch personal data.
-6. End with a 30/60/90-day plan that a small team can run, not a 40-control wish list.
+## 2. Abuse cases before tools
 
-## Baseline checklist (use as the review spine)
+List the cases that apply and rank them by likely cost for this product: fake signups, synthetic identity, account takeover, first-party or friendly fraud, promo and referral abuse, card testing, mule accounts, authorised push payment scams against users, insider abuse.
 
-Copy this into the review and mark each item: in place / partial / missing / not applicable.
+For each: the signal the team can observe today, the decision (allow, step-up, hold, deny), who owns the case, and what the user is told. Prefer step-up over silent rejection.
 
-### 1. Accounts and access
+Keep three questions apart and say so if a design merges them: is this a real person (identity proofing), is this action abusive (fraud risk), will they repay (credit risk).
 
-- [ ] Unique, verified contact (email or phone) before the account can do anything risky
-- [ ] Strong authentication available; MFA on high-risk actions (password change, payout destination, large transfer)
-- [ ] Session handling: logout, device list, sign-out of other sessions
-- [ ] Credential-stuffing and brute-force protections (rate limits, bot resistance)
-- [ ] Recovery path that is not weaker than login (watch for “reset via easily phished channel only”)
+## 3. Baseline checklist
 
-### 2. Onboarding and identity
+Mark each: in place, partial, missing, not applicable.
 
-- [ ] Written policy for when identity is required vs. when a lightweight signup is enough
-- [ ] Documented data sources (user-entered, bureau, device, bank-link) and the legal basis / consent for each
-- [ ] Synthetic and stolen-identity clues are reviewed by a person when the stake is high
-- [ ] Minors and ineligible geographies are blocked with a clear rule, not a hidden heuristic you cannot explain
+Accounts and access
+- Verified contact before risky actions
+- MFA on password change, payout destination change and large transfers
+- Device and session list, sign out elsewhere
+- Rate limits and bot resistance on login and signup
+- Recovery no weaker than login
 
-### 3. Money movement and value
+Onboarding and identity
+- Written rule for when identity verification is required
+- Data sources listed with the consent or legal basis for each
+- Human review for high-stake synthetic or stolen identity hits
+- Clear, explainable eligibility rules (age, geography)
 
-- [ ] Limits by age of account, verified status, and destination (new bank account, new card, new device)
-- [ ] Holds or delays on first withdrawals / first referral rewards
-- [ ] Promo, referral, and gift-card earning rules are capped, server-enforced, and not payable on unverified events
-- [ ] Refund, chargeback, and dispute paths have an owner and a record
+Money and value
+- Limits by account age, verification and destination newness
+- Holds on first withdrawal and first referral payout
+- Promo and referral rules capped and enforced server-side
+- Owner and record for refunds, chargebacks and disputes
 
-### 4. Detection and cases
+Detection and cases
+- One place alerts become cases
+- Each case records time, user, signal, decision, reason, decider
+- Scheduled false positive review
+- Written incident path: who can lock accounts, who talks to users and partners
 
-- [ ] A single place where alerts become cases (even a spreadsheet is fine at the start, if it is complete)
-- [ ] Each case has: time, user, signal, decision, reason, and who decided
-- [ ] True-positive and false-positive review happens on a schedule
-- [ ] A written “break glass” path for an incident (who can lock accounts, who talks to users, who talks to a partner bank or processor)
+People and vendors
+- Least privilege and audit logs on support tools
+- Vendor list with data shared and offboarding steps
+- Social engineering drills for support
 
-### 5. People and vendors
+## 4. Standing up rules with fraudkit
 
-- [ ] Least-privilege access to customer support tools; audit log for lookups
-- [ ] Vendor list: what data they receive, where it is stored, how to offboard
-- [ ] Staff phishing and social-engineering drills for support (they will be targeted)
+Only if the team has event data or can export it.
+
+1. Map their events to the fraudkit schema (`ts`, `type`, `account_id`, plus `device_id`, `ip`, `email`, `phone`, `card_fp`, `address`, `amount`, `promo_code`). Phones and addresses should be keyed hashes. Never ask them to paste raw customer data into the chat; work from the schema and a synthetic sample.
+2. Start from `src/fraudkit/default_rules.yaml`. Remove rules for events they do not have. Set thresholds from their own volumes, for example the 99th percentile of signups per device per day, not from the defaults.
+3. Run `fraudkit synth` and `fraudkit score` to show the team what each reason code looks like before touching real data.
+4. Run in shadow mode for at least two weeks. Use `fraudkit eval` on labelled outcomes to tune (see `docs/tuning.md`).
+5. Only then wire `deny`. Keep `review` going to a person.
+
+Call out the engine's limits when they matter: in-memory state, no shared store across workers, no device fingerprinting, no IP reputation data included.
+
+## 5. Privacy
+
+Collect what a control needs and no more. Say when a vendor would receive personal data. Reason codes are for analysts; users get a generic message and an appeal path.
 
 ## Output format
 
-Write a short report:
+A short report:
 
-1. Scope and product facts you relied on (and what you did not know)
-2. Top abuse cases, ranked by likely impact for this product
+1. Scope and the product facts relied on, plus what was unknown
+2. Top abuse cases, ranked for this product
 3. Checklist with status
-4. Gaps, in priority order
-5. A 30/60/90-day workflow (who does what)
-6. Open legal / compliance questions the company should take to counsel (especially if they operate in payments, credit, or across U.S. states)
+4. Gaps in priority order
+5. Rules plan: which fraudkit rules to enable, starting thresholds and why, shadow-mode period (skip if no event data)
+6. 30/60/90 day plan with owners
+7. Open legal and compliance questions for counsel, especially for payments, credit, or multi-state U.S. operation
 
-If this is for a regulated partner (a bank, a processor), say clearly that their program policy controls, and this checklist is only a preparation aid.
+If a regulated partner is involved, say their policy controls and this review is preparation only. See `examples/sample-review.md` for the shape.
