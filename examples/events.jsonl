@@ -1,0 +1,11 @@
+{"event_id":"e1","ts":"2026-03-02T09:00:00Z","type":"signup","account_id":"u100","device_id":"dev-7f2a","ip":"198.51.100.20","email":"maria.silva@example.com","card_fp":"cf-11"}
+{"event_id":"e2","ts":"2026-03-02T09:05:00Z","type":"login","account_id":"u100","device_id":"dev-7f2a","ip":"198.51.100.20","success":true}
+{"event_id":"e3","ts":"2026-03-09T02:10:00Z","type":"login","account_id":"u100","device_id":"dev-c901","ip":"203.0.113.77","success":true}
+{"event_id":"e4","ts":"2026-03-09T02:14:00Z","type":"password_reset","account_id":"u100","device_id":"dev-c901","ip":"203.0.113.77"}
+{"event_id":"e5","ts":"2026-03-09T02:20:00Z","type":"payout_change","account_id":"u100","device_id":"dev-c901","ip":"203.0.113.77"}
+{"event_id":"e6","ts":"2026-03-10T11:00:00Z","type":"signup","account_id":"u201","device_id":"dev-farm","ip":"203.0.113.5","email":"k3v9x0rj2mtw7pq@example.net","card_fp":"cf-99"}
+{"event_id":"e7","ts":"2026-03-10T11:04:00Z","type":"signup","account_id":"u202","device_id":"dev-farm","ip":"203.0.113.6","email":"deals+1@example.com","card_fp":"cf-99"}
+{"event_id":"e8","ts":"2026-03-10T11:09:00Z","type":"signup","account_id":"u203","device_id":"dev-farm","ip":"203.0.113.7","email":"deals+2@example.com","card_fp":"cf-99"}
+{"event_id":"e9","ts":"2026-03-10T11:10:00Z","type":"promo_redeem","account_id":"u201","promo_code":"WELCOME10"}
+{"event_id":"e10","ts":"2026-03-10T11:11:00Z","type":"promo_redeem","account_id":"u202","promo_code":"WELCOME10"}
+{"event_id":"e11","ts":"2026-03-10T11:12:00Z","type":"promo_redeem","account_id":"u203","promo_code":"WELCOME10"}
