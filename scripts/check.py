@@ -53,7 +53,7 @@ NEGATION = re.compile(
     r"(?i)\b(not|never|no|don't|do not|doesn't|does not|isn't|is not|neither|nor|without)\b"
 )
 TRACTION_COUNT = re.compile(
-    r"(?i)\b\d[\d,]*\+?\s*(users|customers|downloads|stars|members|companies)\b"
+    r"(?i)(?<![\w-])\d[\d,]*\+?\s*(users|customers|downloads|stars|members|companies)\b"
 )
 TRACTION_PHRASE = re.compile(
     r"(?i)\b(our customers|our users|trusted by|used in production by|in production at"
