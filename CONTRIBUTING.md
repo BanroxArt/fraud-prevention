@@ -29,3 +29,7 @@ make check
 ## Commit messages
 
 Short imperative subject in lower case (`engine: dedup on event_id`), a blank line, then why. Sign-off is not required.
+
+## Conduct
+
+Everyone taking part in issues, pull requests and reviews is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md) (Contributor Covenant 2.1). Reports go to opensource@banrox.com and are read by the maintainers only.
