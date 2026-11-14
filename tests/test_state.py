@@ -48,7 +48,7 @@ def test_events_without_id_are_not_deduplicated(cfg, ev):
 
 
 def test_dedup_expires_after_window(rules_dict, ev):
-    rules_dict["state"] = {"dedup_window": "1h", "dedup_max_ids": 10}
+    rules_dict["state"] = {"dedup_window": "1h", "dedup_max_ids": 10, "allowed_lateness": "10m"}
     e = Engine(build_rules(rules_dict))
     e.score(ev("login", event_id="x", t=0))
     assert e.score(ev("login", event_id="x", t=60)).duplicate
@@ -91,8 +91,10 @@ def test_prune_uses_high_water_mark_not_late_event(cfg, ev, monkeypatch):
     monkeypatch.setattr(e, "prune", lambda now: calls.append(now))
     for i in range(PRUNE_EVERY - 1):
         e.score(ev("login", t=1_000 + i))
-    e.score(ev("login", t=0))  # late event lands on the prune boundary
-    assert calls and calls[0] >= 1_000
+    newest = 1_000 + PRUNE_EVERY - 2
+    # A late event inside allowed_lateness lands on the prune boundary.
+    e.score(ev("login", t=newest - 600))
+    assert calls == [BASE_TS + newest]
 
 
 @pytest.mark.parametrize(

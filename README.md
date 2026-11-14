@@ -118,11 +118,28 @@ Every structure the engine keeps is bounded, because nearly every key in it come
 
 `Engine.prune(now)` runs every 10,000 events against the newest timestamp seen so far and returns what it dropped. `Engine.state_size()` gives the current counts if you want to export them as metrics. Hitting a hard cap means some signal is lost for the evicted keys; if it happens under normal traffic, raise the cap rather than live with it.
 
+## Late and out-of-order events
+
+Windows run on event time. Queues redeliver out of order, mobile clients batch events from a flight, and a consumer that restarts may replay an hour behind, so arrival order cannot be trusted. Three settings in `state:` cover it:
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `allowed_lateness` | `1h` | An event older than (newest timestamp seen minus this) is behind the watermark. It is not scored against state, gets `late: true`, a `LATE_EVENT` reason with how far behind it was, and `late_action`. |
+| `late_action` | `review` | `allow`, `review` or `deny` for refused events. `review` is the safe choice: a late event is unusual, and refusing to look at it silently is how replay abuse goes unnoticed. |
+| `max_future_skew` | off | An event this far ahead of the newest one seen gets `CLOCK_AHEAD` and `late_action`, and does not move the watermark. Without it, one event stamped next year makes every later event late. Turn it on for live streams; leave it off for batch replays with gaps. |
+
+An event inside `allowed_lateness` is scored, and every window answers as of its own timestamp. Three card attempts at 10:15 do not count against a payment that happened at 10:00 and arrived at 10:20. To make that answer exact, each window keeps the last `allowed_lateness` of expired entries, so memory per key grows by roughly that fraction of the window. The property tests check the window answers against a brute-force count for arbitrary arrival orders inside the bound.
+
+`allowed_lateness` has to be shorter than `dedup_window`. Otherwise an event delivered once, then redelivered after its dedup entry expired but while still inside the lateness bound, would be scored twice.
+
+`fraudkit score` prints how many events it refused on stderr.
+
 ## Limitations
 
 - State is in memory and per process. Restarting loses windows and links. For more than one worker, shard by account and accept that cross-account signals (shared devices, rings) need a shared store such as Redis. That is not built here.
 - Dedup keys on `event_id` alone. Two different events sent with the same id get one decision; make ids unique upstream.
-- Late events are inserted in order but cost O(n) for that key. Badly ordered input should be sorted first (`--sort`).
+- Late events cost O(n) for their key, and the takeover tracker and linker see events in arrival order even inside `allowed_lateness`, so a sequence delivered backwards is not reassembled. Badly ordered input should be sorted first (`--sort`).
+- A late event is answered as of its own time, but the decisions already made for the events after it are not revisited. If a late payment would have pushed a later one over a threshold, that later one stays scored as it was.
 - The synthetic generator is blunt. `make demo` numbers show the engine does what the rules say. They say nothing about catch rates on real traffic.
 - No device fingerprinting, no consortium data, no ML. Those are worth buying once you know what you are losing money to.
 - This is a decision aid. Denying someone money or access has legal and fairness consequences; keep a human in the loop for `deny` until you have reviewed outcomes.

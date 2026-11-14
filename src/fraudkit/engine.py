@@ -16,6 +16,17 @@ tracker caps accounts and ages them out, the linker ages out edges, and the
 dedup cache is capped by count and age. ``prune`` runs every ``PRUNE_EVERY``
 events against the newest timestamp seen so far, so one late event cannot
 drag pruning back in time.
+
+Event time, not arrival time, drives every window, so ordering matters. The
+engine tracks a watermark: the newest timestamp seen minus
+``allowed_lateness``. An event at or above the watermark is scored normally,
+and the windows answer as of its own timestamp. An event below it is not
+scored against state at all: by then pruning may have dropped what it should
+be compared with, and inserting it would rewrite history that later decisions
+already relied on. It gets ``late: true``, a ``LATE_EVENT`` reason and
+``late_action``. ``max_future_skew`` does the mirror image for timestamps too
+far ahead of the newest one seen; without it, one event stamped next year
+moves the watermark and turns the whole stream late.
 """
 
 from __future__ import annotations
@@ -54,6 +65,7 @@ class Decision:
     action: str
     reasons: list[Reason] = field(default_factory=list)
     duplicate: bool = False
+    late: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -90,19 +102,22 @@ class Engine:
             max_edges=config.max_link_edges,
         )
         max_keys = config.max_keys_per_window
+        # Windows keep expired entries this long so late events get as-of answers.
+        grace = config.allowed_lateness_s
         self._windows: dict[str, CountWindow] = {}
         for rule in config.velocity:
             cls = {"count": CountWindow, "sum": SumWindow, "distinct": DistinctWindow}[rule.kind]
-            self._windows[rule.code] = cls(rule.window_s, max_keys)
+            self._windows[rule.code] = cls(rule.window_s, max_keys, grace)
         reuse = config.identity_reuse_window_s
-        self._phone_accounts = DistinctWindow(reuse, max_keys)
-        self._address_accounts = DistinctWindow(reuse, max_keys)
-        self._card_accounts = DistinctWindow(reuse, max_keys)
+        self._phone_accounts = DistinctWindow(reuse, max_keys, grace)
+        self._address_accounts = DistinctWindow(reuse, max_keys, grace)
+        self._card_accounts = DistinctWindow(reuse, max_keys, grace)
         # account -> promo code -> last redemption ts, aged with the link window
         self._promo_by_account: OrderedDict[str, dict[str, float]] = OrderedDict()
         self._decisions: OrderedDict[str, Decision] = OrderedDict()
         self._seen = 0
         self._high_water = float("-inf")
+        self.late_events = 0
 
     @staticmethod
     def _field(ev: Event, name: str) -> str | None:
@@ -176,7 +191,7 @@ class Engine:
         prior = self._decisions.get(ev.event_id)
         if prior is None:
             return None
-        if self._high_water - prior.ts >= self.cfg.dedup_window_s:
+        if max(self._high_water, ev.ts) - prior.ts >= self.cfg.dedup_window_s:
             # Too old to be a redelivery we can vouch for; score it fresh.
             del self._decisions[ev.event_id]
             return None
@@ -190,11 +205,39 @@ class Engine:
         while len(self._decisions) > self.cfg.dedup_max_ids:
             self._decisions.popitem(last=False)
 
+    @property
+    def watermark(self) -> float:
+        """Events older than this are refused by ``score``. ``-inf`` before the first event."""
+        return self._high_water - self.cfg.allowed_lateness_s
+
+    def _out_of_order(self, ev: Event) -> Decision | None:
+        if self._high_water == float("-inf"):
+            return None
+        if ev.ts < self.watermark:
+            code = "LATE_EVENT"
+            detail = f"{self._high_water - ev.ts:g}s behind newest event"
+        else:
+            skew = self.cfg.max_future_skew_s
+            if skew is None or ev.ts - self._high_water <= skew:
+                return None
+            code = "CLOCK_AHEAD"
+            detail = f"{ev.ts - self._high_water:g}s ahead of newest event"
+        self.late_events += 1
+        reason = Reason(code, self.cfg.weight(code), detail)
+        return Decision(
+            ev.event_id, ev.account_id, ev.ts, 0.0, self.cfg.late_action, [reason], late=True
+        )
+
     def score(self, ev: Event) -> Decision:
-        self._high_water = max(self._high_water, ev.ts)
         replayed = self._replayed(ev)
         if replayed is not None:
             return replayed
+        refused = self._out_of_order(ev)
+        if refused is not None:
+            # Remembered, so a redelivery of the same late event gets the same answer.
+            self._remember(refused)
+            return refused
+        self._high_water = max(self._high_water, ev.ts)
         self._seen += 1
         if self._seen % PRUNE_EVERY == 0:
             self.prune(self._high_water)

@@ -55,6 +55,8 @@ velocity:
     weight: 30
 
 weights:
+  LATE_EVENT: 0               # explanation only; late_action sets the outcome
+  CLOCK_AHEAD: 0
   EMAIL_DISPOSABLE: 30
   EMAIL_PLUS_TAG: 5
   EMAIL_DIGIT_HEAVY: 8
@@ -118,6 +120,10 @@ state:
   max_keys_per_window: 1000000
   max_accounts: 1000000
   max_link_edges: 2000000
+  # Ordering. Event time drives the windows; see "Late and out-of-order events".
+  allowed_lateness: 1h        # older than (newest ts seen - this) is not scored
+  late_action: review         # action for refused late or future-dated events
+  # max_future_skew: 15m      # off by default; turn on for live streams only
 
 allowlist:
   accounts: []

@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- A late event was charged for observations that happened after it. Windows now answer as of the event's own timestamp, and keep `allowed_lateness` of expired entries so that answer is exact.
 - Replayed events no longer inflate velocity windows. A repeated `event_id` inside `state.dedup_window` returns the first decision with `duplicate: true` and leaves state alone.
 - `ATO_SEQUENCE` now requires the credential change and the cash-out to come from the same new device, after that device's first login. Previously a reset from a known device plus an unrelated new-device login earlier in the window graded as a full takeover (weight 85).
 - `AtoTracker`, `Linker` and the per-account promo map were never pruned. All three now age out with `Engine.prune` and have hard caps, so state no longer grows with the number of accounts or attribute values forever.
@@ -16,6 +17,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Event-time ordering. `state.allowed_lateness` (default 1h) sets a watermark; events behind it are not scored against state and come back with `late: true`, a `LATE_EVENT` reason and `state.late_action`. Optional `state.max_future_skew` does the same for future-dated events (`CLOCK_AHEAD`) so one bad clock cannot move the watermark. `Engine.watermark` and `Engine.late_events` expose both.
 - Input bounds in the event parser: 256-character identifiers, at most 32 extra fields, finite `amount` and `ts`.
 - `state:` section in the rules file for dedup and memory caps; `linking.window`, `linking.max_cluster_size`, `ato.device_ttl` and `identity.card_reuse_threshold` (was hardcoded to 2).
 - `Engine.state_size()` and a return value from `Engine.prune()` for monitoring.
@@ -26,7 +28,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Changed
 
 - The packaged rules ship with empty `hosting_cidrs`. The documentation range that used to be there moved to `examples/demo-rules.yaml`, which `make demo` uses.
-- `Decision` has a `duplicate` field, so scored JSON output has one more key.
+- `Decision` has `duplicate` and `late` fields, so scored JSON output has two more keys.
+- Window constructors take an optional `grace_s`.
 
 ## [0.1.0] - 2026-11-12
 

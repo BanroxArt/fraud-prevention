@@ -57,6 +57,8 @@ velocity:
     weight: 30
 
 weights:
+  LATE_EVENT: 0
+  CLOCK_AHEAD: 0
   EMAIL_DISPOSABLE: 30
   EMAIL_PLUS_TAG: 5
   EMAIL_DIGIT_HEAVY: 8
@@ -117,6 +119,8 @@ state:
   max_keys_per_window: 1000000
   max_accounts: 1000000
   max_link_edges: 2000000
+  allowed_lateness: 1h
+  late_action: review
 
 allowlist:
   accounts: []

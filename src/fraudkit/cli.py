@@ -60,6 +60,12 @@ def cmd_score(args: argparse.Namespace) -> int:
         finally:
             if out is not sys.stdout:
                 out.close()
+    if engine.late_events:
+        print(
+            f"{engine.late_events} event(s) outside the ordering bounds were not scored"
+            " (late: true in the output)",
+            file=sys.stderr,
+        )
     if bad and args.strict:
         return 1
     return 0

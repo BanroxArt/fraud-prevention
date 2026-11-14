@@ -34,6 +34,9 @@ KEY_FIELDS = {
 }
 
 
+LATE_ACTIONS = frozenset({"allow", "review", "deny"})
+
+
 class RuleError(ValueError):
     pass
 
@@ -96,6 +99,10 @@ class RuleConfig:
     max_keys_per_window: int = 1_000_000
     max_accounts: int = 1_000_000
     max_link_edges: int = 2_000_000
+    # Ordering. See "Late and out-of-order events" in the README.
+    allowed_lateness_s: float = 3600.0
+    max_future_skew_s: float | None = None
+    late_action: str = "review"
 
     def weight(self, code: str) -> float:
         return self.weights.get(code, 0.0)
@@ -230,6 +237,23 @@ def build_rules(data: dict[str, Any]) -> RuleConfig:
     if not isinstance(state, dict):
         raise RuleError("state must be a mapping")
     cfg.dedup_window_s = _positive_duration(state.get("dedup_window", "24h"), "state.dedup_window")
+    if "allowed_lateness" in state:
+        lateness = parse_duration(state["allowed_lateness"])
+        if lateness < 0:
+            raise RuleError("state.allowed_lateness: must not be negative")
+        cfg.allowed_lateness_s = lateness
+    if state.get("max_future_skew") is not None:
+        cfg.max_future_skew_s = _positive_duration(
+            state["max_future_skew"], "state.max_future_skew"
+        )
+    late_action = str(state.get("late_action", cfg.late_action))
+    if late_action not in LATE_ACTIONS:
+        raise RuleError(f"state.late_action: must be one of {sorted(LATE_ACTIONS)}")
+    cfg.late_action = late_action
+    if cfg.allowed_lateness_s >= cfg.dedup_window_s:
+        # Pruning keeps state for the shortest window it serves; lateness past the
+        # dedup window would let a redelivered late event be scored twice.
+        raise RuleError("state.allowed_lateness: must be shorter than state.dedup_window")
     for name in ("dedup_max_ids", "max_keys_per_window", "max_accounts", "max_link_edges"):
         if name in state:
             setattr(cfg, name, _positive_int(state[name], f"state.{name}"))
