@@ -150,6 +150,10 @@ More: [docs/threat-model.md](docs/threat-model.md), [docs/tuning.md](docs/tuning
 
 `SKILL.md` is a skill file for coding agents that support them. Copy it to `.cursor/skills/fraud-prevention/SKILL.md` (or your agent's equivalent). It walks an agent through a defensive fraud program review and, where the team has event data, through standing up `fraudkit` against it. [examples/sample-review.md](examples/sample-review.md) shows the report shape on a made-up company.
 
+## Benchmarks
+
+Per-operation timings and how to reproduce them: [docs/benchmarks.md](docs/benchmarks.md).
+
 ## License
 
 MIT. See [LICENSE](LICENSE). Copyright 2026 Banrox Inc.

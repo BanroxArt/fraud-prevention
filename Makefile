@@ -1,6 +1,6 @@
 PY ?= python3
 
-.PHONY: install lint test check demo
+.PHONY: bench install lint test check demo
 
 install:
 	$(PY) -m pip install -e '.[dev]'
@@ -20,3 +20,6 @@ demo:
 	$(PY) -m fraudkit synth --seed 7 --accounts 300 -o /tmp/fraudkit-events.jsonl
 	$(PY) -m fraudkit score /tmp/fraudkit-events.jsonl --rules examples/demo-rules.yaml -o /tmp/fraudkit-scored.jsonl
 	$(PY) -m fraudkit eval /tmp/fraudkit-scored.jsonl
+
+bench:
+	PYTHONPATH=src $(PY) bench/run.py
