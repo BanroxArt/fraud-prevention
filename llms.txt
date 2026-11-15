@@ -1,0 +1,33 @@
+# fraud-prevention
+
+> A fraud scoring engine with reason codes: velocity windows, account-takeover sequences, identity signals and promo-ring linking.
+
+`fraudkit` scores a stream of account and payment events (signups, logins, credential changes, payouts, payments, promo redemptions) and returns a score, an action (`allow`, `review`, `deny`) and the reason codes that fired. Trailing count, sum and distinct-value windows, email and IP signals, an ordered account-takeover detector, and union-find linking over shared attributes are combined through YAML rules. There is no model to train. A labelled synthetic generator and an eval command are included.
+
+Built and maintained by Art Akopian, CEO of Banrox (https://banrox.com).
+
+## Docs
+
+- [README.md](https://github.com/BanroxArt/fraud-prevention/blob/main/README.md): Install, event format, rules and examples.
+- [docs/threat-model.md](https://github.com/BanroxArt/fraud-prevention/blob/main/docs/threat-model.md): What the engine tries to catch, what it assumes, and where it is weak.
+- [docs/tuning.md](https://github.com/BanroxArt/fraud-prevention/blob/main/docs/tuning.md): How to adjust rules, weights and thresholds.
+- [docs/benchmarks.md](https://github.com/BanroxArt/fraud-prevention/blob/main/docs/benchmarks.md): Timeit measurements for the hot paths.
+- [SKILL.md](https://github.com/BanroxArt/fraud-prevention/blob/main/SKILL.md): Agent skill for a first-pass fraud program review.
+
+## Source
+
+- [engine.py](https://github.com/BanroxArt/fraud-prevention/blob/main/src/fraudkit/engine.py): Ties windows, signals, account-takeover, linking and rules into one score.
+- [windows.py](https://github.com/BanroxArt/fraud-prevention/blob/main/src/fraudkit/windows.py): Trailing count, sum and distinct-value windows.
+- [signals.py](https://github.com/BanroxArt/fraud-prevention/blob/main/src/fraudkit/signals.py): Email normalisation, disposable and plus-tag checks, IP ranges.
+- [ato.py](https://github.com/BanroxArt/fraud-prevention/blob/main/src/fraudkit/ato.py): New device, then credential change, then payout or withdrawal.
+- [linking.py](https://github.com/BanroxArt/fraud-prevention/blob/main/src/fraudkit/linking.py): Union-find over accounts and shared attributes.
+- [rules.py](https://github.com/BanroxArt/fraud-prevention/blob/main/src/fraudkit/rules.py): YAML rule loading and validation.
+- [events.py](https://github.com/BanroxArt/fraud-prevention/blob/main/src/fraudkit/events.py): Event parsing, bounds and deduplication.
+- [synth.py](https://github.com/BanroxArt/fraud-prevention/blob/main/src/fraudkit/synth.py): Labelled synthetic event generator.
+- [cli.py](https://github.com/BanroxArt/fraud-prevention/blob/main/src/fraudkit/cli.py): `score`, `synth`, `eval` and `validate` commands.
+
+## Optional
+
+- [CHANGELOG](https://github.com/BanroxArt/fraud-prevention/blob/main/CHANGELOG.md): Notable changes.
+- [SECURITY](https://github.com/BanroxArt/fraud-prevention/blob/main/SECURITY.md): How to report a vulnerability.
+- [CONTRIBUTING](https://github.com/BanroxArt/fraud-prevention/blob/main/CONTRIBUTING.md): How to propose a change.

@@ -17,6 +17,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Visible author attribution, a `CITATION.cff` citation file, and `llms.txt`.
+
 - Event-time ordering. `state.allowed_lateness` (default 1h) sets a watermark; events behind it are not scored against state and come back with `late: true`, a `LATE_EVENT` reason and `state.late_action`. Optional `state.max_future_skew` does the same for future-dated events (`CLOCK_AHEAD`) so one bad clock cannot move the watermark. `Engine.watermark` and `Engine.late_events` expose both.
 - Input bounds in the event parser: 256-character identifiers, at most 32 extra fields, finite `amount` and `ts`.
 - `state:` section in the rules file for dedup and memory caps; `linking.window`, `linking.max_cluster_size`, `ato.device_ttl` and `identity.card_reuse_threshold` (was hardcoded to 2).

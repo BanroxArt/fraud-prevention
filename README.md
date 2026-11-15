@@ -6,7 +6,7 @@ The engine takes a stream of events (signups, logins, password resets, payout ch
 
 It is meant for teams that need something better than nothing in week one, and want the rules in a file they can review, not buried in a vendor console.
 
-Author: Art Akopian ([Banrox](https://banrox.com))
+Built and maintained by Art Akopian, CEO of [Banrox](https://banrox.com). Banrox builds consumer credit and fraud-prevention software and publishes the general-purpose pieces.
 
 ## What's in it
 
